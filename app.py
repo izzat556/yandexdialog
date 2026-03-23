@@ -151,36 +151,73 @@ def devices_action():
     return jsonify({"devices": result_devices})
 
 # Общий endpoint для discovery, query и action
+# ---------- Smart Home endpoints ----------
 @app.route("/v1.0", methods=["POST", "HEAD"])
 def yandex_dialog():
     if request.method == "HEAD":
         return Response(status=200)
-    body = request.get_json(silent=True) or {}
-    request_id = request.headers.get("X-Request-Id", "")
 
-    # Для discovery user_id обязателен
+    body = request.get_json(silent=True) or {}
+    request_id = body.get("headers", {}).get("request_id", "") or request.headers.get("X-Request-Id", "")
+
+    # ---------- Discovery ----------
     if body.get("request_type") == "discovery":
         return jsonify({
             "request_id": request_id,
             "payload": {
-                "user_id": "user_001",
+                "user_id": "Misha-01-super-545",  # 🔹 user_id обязательно
                 "devices": [
                     {
                         "id": "lamp_1",
                         "name": "Лампа",
+                        "description": "цветная лампа",
+                        "room": "спальня",
                         "type": "devices.types.light",
-                        "capabilities": [{
-                            "type": "devices.capabilities.on_off",
-                            "retrievable": True,
-                            "reportable": False,
-                            "parameters": {}
-                        }]
+                        "custom_data": {
+                            "foo": 1,
+                            "bar": "two",
+                            "baz": False,
+                            "qux": [1, "two", False],
+                            "quux": {"quuz": {"corge": []}}
+                        },
+                        "capabilities": [
+                            {
+                                "type": "devices.capabilities.on_off",
+                                "retrievable": True,
+                                "reportable": True
+                            },
+                            {
+                                "type": "devices.capabilities.range",
+                                "retrievable": True,
+                                "reportable": True,
+                                "parameters": {
+                                    "instance": "brightness",
+                                    "unit": "unit.percent",
+                                    "range": {"min": 0, "max": 100, "precision": 1}
+                                }
+                            },
+                            {
+                                "type": "devices.capabilities.color_setting",
+                                "retrievable": True,
+                                "reportable": True,
+                                "parameters": {
+                                    "color_model": "hsv",
+                                    "temperature_k": {"min": 2700, "max": 9000, "precision": 1}
+                                }
+                            }
+                        ],
+                        "device_info": {
+                            "manufacturer": "Provider2",
+                            "model": "hue g11",
+                            "hw_version": "1.2",
+                            "sw_version": "5.4"
+                        }
                     }
                 ]
             }
         })
 
-    # Для query/action проверяем токен
+    # ---------- Query / Action ----------
     user = get_user_by_token()
     if not user:
         return jsonify({"error": "unauthorized"}), 401
@@ -192,12 +229,13 @@ def yandex_dialog():
         for item in devices:
             device_id = item.get("id")
             if device_id in DEVICES:
+                dev = DEVICES[device_id]
                 result_devices.append({
                     "id": device_id,
-                    "capabilities": [{
-                        "type": "devices.capabilities.on_off",
-                        "state": {"instance": "on", "value": DEVICES[device_id]["state"]}
-                    }]
+                    "capabilities": [
+                        {"type": "devices.capabilities.on_off",
+                         "state": {"instance": "on", "value": dev["state"]}}
+                    ]
                 })
             else:
                 result_devices.append({"id": device_id, "error_code": "DEVICE_UNREACHABLE"})
@@ -211,24 +249,26 @@ def yandex_dialog():
             device_id = item.get("id")
             capabilities = item.get("capabilities", [])
             if device_id not in DEVICES:
-                result_devices.append({"id": device_id, "action_result": {"status": "ERROR", "error_code": "DEVICE_UNREACHABLE"}})
+                result_devices.append({
+                    "id": device_id,
+                    "action_result": {"status": "ERROR", "error_code": "DEVICE_UNREACHABLE"}
+                })
                 continue
-            for capability in capabilities:
-                if capability.get("type") == "devices.capabilities.on_off":
-                    state = capability.get("state", {})
-                    DEVICES[device_id]["state"] = bool(state.get("value", DEVICES[device_id]["state"]))
+            dev = DEVICES[device_id]
+            for cap in capabilities:
+                if cap.get("type") == "devices.capabilities.on_off":
+                    dev["state"] = bool(cap.get("state", {}).get("value", dev["state"]))
             result_devices.append({
                 "id": device_id,
-                "capabilities": [{
-                    "type": "devices.capabilities.on_off",
-                    "state": {"instance": "on", "value": DEVICES[device_id]["state"]}
-                }],
-                "action_result": {"status": "DONE"}
+                "action_result": {"status": "DONE"},
+                "capabilities": [
+                    {"type": "devices.capabilities.on_off", "state": {"instance": "on", "value": dev["state"]}}
+                ]
             })
         return jsonify({"request_id": request_id, "payload": {"devices": result_devices}})
 
+    # default fallback
     return jsonify({"request_id": request_id, "payload": {"devices": []}})
-
 # ---------- OAuth ----------
 @app.route("/oauth/authorize", methods=["GET", "POST", "HEAD"])
 def authorize():
