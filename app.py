@@ -32,12 +32,28 @@ ACCESS_TTL_SECONDS = 3600
 REFRESH_TTL_SECONDS = 2592000
 
 # ---------- Test devices ----------
+# We store device state separately to support dynamic updates
 DEVICES = {
     "lamp_1": {
         "id": "lamp_1",
         "name": "Лампа",
+        "description": "Умная лампа",
+        "room": "Гостиная",
         "type": "devices.types.light",
-        "state": False
+        "state": False,          # current on/off state
+        "capabilities": [
+            {
+                "type": "devices.capabilities.on_off",
+                "retrievable": True,
+                "parameters": {}   # no extra params for on_off
+            }
+        ],
+        "device_info": {
+            "manufacturer": "MyCompany",
+            "model": "Smart Lamp",
+            "hw_version": "1.0",
+            "sw_version": "1.0"
+        }
     }
 }
 
@@ -98,7 +114,130 @@ def root():
         return Response(status=200)
     return jsonify({"status": "ok", "message": "OAuth server is running"})
 
-# Smart Home endpoints
+# Yandex Smart Home main endpoint
+@app.route("/v1.0", methods=["POST", "HEAD"])
+def yandex_smart_home():
+    if request.method == "HEAD":
+        return Response(status=200)
+
+    # 1. Authenticate user
+    user_id = get_user_by_token()
+    if not user_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    # 2. Parse request
+    body = request.get_json(silent=True)
+    if not body:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    request_type = body.get("request_type")
+    api_version = body.get("api_version", 1.0)
+    request_id = body.get("headers", {}).get("request_id", "")
+
+    logging.info(f"Smart Home request: type={request_type}, user={user_id}, req_id={request_id}")
+
+    # 3. Handle different request types
+    if request_type == "discovery":
+        # Build devices list with capabilities
+        devices_list = []
+        for dev_id, dev in DEVICES.items():
+            devices_list.append({
+                "id": dev["id"],
+                "name": dev["name"],
+                "description": dev.get("description", ""),
+                "room": dev.get("room", ""),
+                "type": dev["type"],
+                "capabilities": dev["capabilities"],
+                "device_info": dev["device_info"]
+            })
+
+        return jsonify({
+            "request_id": request_id,
+            "payload": {
+                "user_id": user_id,
+                "devices": devices_list
+            }
+        })
+
+    elif request_type == "state":
+        # Report current states
+        devices_state = []
+        for dev_id, dev in DEVICES.items():
+            # Build state for each capability
+            capabilities_state = []
+            for cap in dev["capabilities"]:
+                if cap["type"] == "devices.capabilities.on_off":
+                    capabilities_state.append({
+                        "type": "devices.capabilities.on_off",
+                        "state": {
+                            "instance": "on",
+                            "value": dev["state"]
+                        }
+                    })
+                # Add other capability states here if needed
+
+            devices_state.append({
+                "id": dev["id"],
+                "capabilities": capabilities_state
+            })
+
+        return jsonify({
+            "request_id": request_id,
+            "payload": {
+                "devices": devices_state
+            }
+        })
+
+    elif request_type == "action":
+        # Apply actions
+        payload = body.get("payload", {})
+        devices_actions = payload.get("devices", [])
+        updated_devices = []
+
+        for action in devices_actions:
+            device_id = action.get("id")
+            if device_id not in DEVICES:
+                continue
+
+            capabilities = action.get("capabilities", [])
+            device_state_updated = False
+
+            for cap in capabilities:
+                cap_type = cap.get("type")
+                if cap_type == "devices.capabilities.on_off":
+                    new_state = cap.get("state", {}).get("value")
+                    if new_state is not None:
+                        DEVICES[device_id]["state"] = new_state
+                        device_state_updated = True
+
+            # Prepare response for this device
+            updated_capabilities = []
+            if device_state_updated:
+                updated_capabilities.append({
+                    "type": "devices.capabilities.on_off",
+                    "state": {
+                        "instance": "on",
+                        "action_result": {
+                            "status": "DONE"
+                        }
+                    }
+                })
+            updated_devices.append({
+                "id": device_id,
+                "capabilities": updated_capabilities
+            })
+
+        return jsonify({
+            "request_id": request_id,
+            "payload": {
+                "devices": updated_devices
+            }
+        })
+
+    else:
+        return jsonify({"error": "Unsupported request_type"}), 400
+
+# Keep legacy endpoints (optional, not used by Yandex Smart Home)
 @app.route("/v1.0/user/unlink", methods=["POST", "HEAD"])
 def user_unlink():
     if request.method == "HEAD":
@@ -109,30 +248,13 @@ def user_unlink():
 def user_devices():
     if request.method == "HEAD":
         return "", 200
+    # This endpoint is not used by Yandex Smart Home, but we keep it for compatibility
     return jsonify({
         "user_id": "user_001",
         "devices": list(DEVICES.values())
     })
 
-
-
-
-# Main Yandex Smart Home endpoint
-@app.route("/v1.0", methods=["POST", "HEAD"])
-def yandex_dialog():
-    if request.method == "HEAD":
-        return Response(status=200)
-
-    body = request.get_json(silent=True) or {}
-    request_id = body.get("headers", {}).get("request_id", "") or request.headers.get("X-Request-Id", "")
-
-   
-    
-
-   
-
-
-# OAuth endpoints
+# ---------- OAuth endpoints ----------
 @app.route("/oauth/authorize", methods=["GET", "POST", "HEAD"])
 def authorize():
     cleanup_expired()
