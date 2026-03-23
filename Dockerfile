@@ -1,21 +1,17 @@
-# Use official Python runtime
 FROM python:3.11-slim
 
-# Set workdir
 WORKDIR /app
 
-# Copy and install dependencies
+# Install dependencies including gunicorn
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt gunicorn
 
-# Copy the app
+# Copy app
 COPY . .
 
-# Set the PORT environment variable (Cloud Run uses this)
+# Cloud Run expects this port
 ENV PORT 8080
-
-# Expose the port (optional, good practice)
 EXPOSE 8080
 
-# Run the app with gunicorn on $PORT
-CMD ["gunicorn", "-b", "0.0.0.0:8080", "main:app"]
+# Start gunicorn server
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "app:app"]
