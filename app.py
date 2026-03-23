@@ -20,6 +20,16 @@ CODE_TTL_SECONDS = 300
 ACCESS_TTL_SECONDS = 3600
 REFRESH_TTL_SECONDS = 2592000
 
+# Простое тестовое устройство
+DEVICES = {
+    "lamp_1": {
+        "id": "lamp_1",
+        "name": "Лампа",
+        "type": "devices.types.light",
+        "state": False
+    }
+}
+
 
 def cleanup_expired():
     now = int(time.time())
@@ -62,6 +72,23 @@ def login_page(client_id="", redirect_uri="", state="", scope="basic"):
     """
 
 
+def get_user_by_token():
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None
+
+    token = auth_header.replace("Bearer ", "", 1).strip()
+    token_data = ACCESS_TOKENS.get(token)
+
+    if not token_data:
+        return None
+
+    if token_data["expires_at"] < int(time.time()):
+        return None
+
+    return token_data["username"]
+
+
 @app.route("/", methods=["GET", "HEAD"])
 def root():
     if request.method == "HEAD":
@@ -74,12 +101,120 @@ def yandex_dialog():
     if request.method == "HEAD":
         return Response(status=200)
 
+    user = get_user_by_token()
+    if not user:
+        return jsonify({"error": "unauthorized"}), 401
+
+    body = request.get_json(silent=True) or {}
+    request_id = request.headers.get("X-Request-Id", "")
+
+    if body.get("request_type") == "discovery":
+        return jsonify({
+            "request_id": request_id,
+            "payload": {
+                "user_id": user,
+                "devices": [
+                    {
+                        "id": "lamp_1",
+                        "name": "Лампа",
+                        "type": "devices.types.light",
+                        "capabilities": [
+                            {
+                                "type": "devices.capabilities.on_off",
+                                "retrievable": True,
+                                "reportable": False,
+                                "parameters": {}
+                            }
+                        ]
+                    }
+                ]
+            }
+        })
+
+    if body.get("request_type") == "query":
+        devices = body.get("payload", {}).get("devices", [])
+        result_devices = []
+
+        for item in devices:
+            device_id = item.get("id")
+            if device_id in DEVICES:
+                result_devices.append({
+                    "id": device_id,
+                    "capabilities": [
+                        {
+                            "type": "devices.capabilities.on_off",
+                            "state": {
+                                "instance": "on",
+                                "value": DEVICES[device_id]["state"]
+                            }
+                        }
+                    ]
+                })
+            else:
+                result_devices.append({
+                    "id": device_id,
+                    "error_code": "DEVICE_UNREACHABLE"
+                })
+
+        return jsonify({
+            "request_id": request_id,
+            "payload": {
+                "devices": result_devices
+            }
+        })
+
+    if body.get("request_type") == "action":
+        devices = body.get("payload", {}).get("devices", [])
+        result_devices = []
+
+        for item in devices:
+            device_id = item.get("id")
+            capabilities = item.get("capabilities", [])
+
+            if device_id not in DEVICES:
+                result_devices.append({
+                    "id": device_id,
+                    "action_result": {
+                        "status": "ERROR",
+                        "error_code": "DEVICE_UNREACHABLE"
+                    }
+                })
+                continue
+
+            for capability in capabilities:
+                if capability.get("type") == "devices.capabilities.on_off":
+                    state = capability.get("state", {})
+                    if state.get("instance") == "on":
+                        DEVICES[device_id]["state"] = bool(state.get("value"))
+
+            result_devices.append({
+                "id": device_id,
+                "capabilities": [
+                    {
+                        "type": "devices.capabilities.on_off",
+                        "state": {
+                            "instance": "on",
+                            "value": DEVICES[device_id]["state"]
+                        }
+                    }
+                ],
+                "action_result": {
+                    "status": "DONE"
+                }
+            })
+
+        return jsonify({
+            "request_id": request_id,
+            "payload": {
+                "devices": result_devices
+            }
+        })
+
     return jsonify({
-        "response": {
-            "text": "Привет, Алиса!",
-            "end_session": False
-        },
-        "version": "1.0"
+        "request_id": request_id,
+        "payload": {
+            "devices": []
+        }
     })
 
 
@@ -135,9 +270,7 @@ def authorize():
 
     query = urllib.parse.urlencode({
         "code": code,
-        "state": state,
-        "client_id": client_id,
-        "scope": scope
+        "state": state
     })
 
     return redirect(f"{redirect_uri}?{query}", code=302)
