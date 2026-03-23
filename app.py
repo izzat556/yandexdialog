@@ -6,6 +6,7 @@ from flask import Flask, request, jsonify, Response, redirect
 
 app = Flask(__name__)
 
+# OAuth настройки
 CLIENT_ID = os.environ.get("CLIENT_ID", "my_alice_app_001")
 CLIENT_SECRET = os.environ.get("CLIENT_SECRET", "change_me_secret")
 TEST_USERNAME = os.environ.get("TEST_USERNAME", "admin")
@@ -30,14 +31,12 @@ DEVICES = {
     }
 }
 
-
 def cleanup_expired():
     now = int(time.time())
     for store in (AUTH_CODES, ACCESS_TOKENS, REFRESH_TOKENS):
         expired = [k for k, v in store.items() if v.get("expires_at", 0) < now]
         for k in expired:
             del store[k]
-
 
 def validate_client(client_id, client_secret=None):
     if client_id != CLIENT_ID:
@@ -46,10 +45,8 @@ def validate_client(client_id, client_secret=None):
         return False
     return True
 
-
 def oauth_error(error, description, status=400):
     return jsonify({"error": error, "error_description": description}), status
-
 
 def login_page(client_id="", redirect_uri="", state="", scope="basic"):
     return f"""
@@ -71,32 +68,24 @@ def login_page(client_id="", redirect_uri="", state="", scope="basic"):
     </html>
     """
 
-
 def get_user_by_token():
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         return None
-
     token = auth_header.replace("Bearer ", "", 1).strip()
     token_data = ACCESS_TOKENS.get(token)
-
-    if not token_data:
+    if not token_data or token_data["expires_at"] < int(time.time()):
         return None
-
-    if token_data["expires_at"] < int(time.time()):
-        return None
-
     return token_data["username"]
 
-
+# ---------- Root ----------
 @app.route("/", methods=["GET", "HEAD"])
 def root():
     if request.method == "HEAD":
         return Response(status=200)
     return jsonify({"status": "ok", "message": "OAuth server is running"})
 
-
-
+# ---------- Smart Home endpoints ----------
 @app.route("/v1.0/user/unlink", methods=["POST", "HEAD"])
 def user_unlink():
     if request.method == "HEAD":
@@ -107,7 +96,6 @@ def user_unlink():
 def user_devices():
     if request.method == "HEAD":
         return "", 200
-    # Возвращаем список устройств
     return jsonify({
         "user_id": "user_001",
         "devices": list(DEVICES.values())
@@ -117,7 +105,6 @@ def user_devices():
 def devices_query():
     if request.method == "HEAD":
         return "", 200
-
     data = request.get_json(silent=True) or {}
     devices = data.get("devices", [])
     result_devices = []
@@ -126,29 +113,19 @@ def devices_query():
         if device_id in DEVICES:
             result_devices.append({
                 "id": device_id,
-                "capabilities": [
-                    {
-                        "type": "devices.capabilities.on_off",
-                        "state": {
-                            "instance": "on",
-                            "value": DEVICES[device_id]["state"]
-                        }
-                    }
-                ]
+                "capabilities": [{
+                    "type": "devices.capabilities.on_off",
+                    "state": {"instance": "on", "value": DEVICES[device_id]["state"]}
+                }]
             })
         else:
-            result_devices.append({
-                "id": device_id,
-                "error_code": "DEVICE_UNREACHABLE"
-            })
-
+            result_devices.append({"id": device_id, "error_code": "DEVICE_UNREACHABLE"})
     return jsonify({"devices": result_devices})
 
 @app.route("/v1.0/user/devices/action", methods=["POST", "HEAD"])
 def devices_action():
     if request.method == "HEAD":
         return "", 200
-
     data = request.get_json(silent=True) or {}
     devices = data.get("devices", [])
     result_devices = []
@@ -161,151 +138,101 @@ def devices_action():
             result_devices.append({
                 "id": device_id,
                 "action_result": {"status": "DONE"},
-                "capabilities": [
-                    {
-                        "type": "devices.capabilities.on_off",
-                        "state": {
-                            "instance": "on",
-                            "value": DEVICES[device_id]["state"]
-                        }
-                    }
-                ]
+                "capabilities": [{
+                    "type": "devices.capabilities.on_off",
+                    "state": {"instance": "on", "value": DEVICES[device_id]["state"]}
+                }]
             })
         else:
             result_devices.append({
                 "id": device_id,
                 "action_result": {"status": "ERROR", "error_code": "DEVICE_UNREACHABLE"}
             })
-
     return jsonify({"devices": result_devices})
 
-
-@app.route("/v1.0", methods=["GET", "POST", "HEAD"])
+# Общий endpoint для discovery, query и action
+@app.route("/v1.0", methods=["POST", "HEAD"])
 def yandex_dialog():
     if request.method == "HEAD":
         return Response(status=200)
-
-    user = get_user_by_token()
-    if not user:
-        return jsonify({"error": "unauthorized"}), 401
-
     body = request.get_json(silent=True) or {}
     request_id = request.headers.get("X-Request-Id", "")
 
+    # Для discovery user_id обязателен
     if body.get("request_type") == "discovery":
         return jsonify({
             "request_id": request_id,
             "payload": {
-                "user_id": user,
+                "user_id": "user_001",
                 "devices": [
                     {
                         "id": "lamp_1",
                         "name": "Лампа",
                         "type": "devices.types.light",
-                        "capabilities": [
-                            {
-                                "type": "devices.capabilities.on_off",
-                                "retrievable": True,
-                                "reportable": False,
-                                "parameters": {}
-                            }
-                        ]
+                        "capabilities": [{
+                            "type": "devices.capabilities.on_off",
+                            "retrievable": True,
+                            "reportable": False,
+                            "parameters": {}
+                        }]
                     }
                 ]
             }
         })
 
+    # Для query/action проверяем токен
+    user = get_user_by_token()
+    if not user:
+        return jsonify({"error": "unauthorized"}), 401
+
+    # query
     if body.get("request_type") == "query":
         devices = body.get("payload", {}).get("devices", [])
         result_devices = []
-
         for item in devices:
             device_id = item.get("id")
             if device_id in DEVICES:
                 result_devices.append({
                     "id": device_id,
-                    "capabilities": [
-                        {
-                            "type": "devices.capabilities.on_off",
-                            "state": {
-                                "instance": "on",
-                                "value": DEVICES[device_id]["state"]
-                            }
-                        }
-                    ]
+                    "capabilities": [{
+                        "type": "devices.capabilities.on_off",
+                        "state": {"instance": "on", "value": DEVICES[device_id]["state"]}
+                    }]
                 })
             else:
-                result_devices.append({
-                    "id": device_id,
-                    "error_code": "DEVICE_UNREACHABLE"
-                })
+                result_devices.append({"id": device_id, "error_code": "DEVICE_UNREACHABLE"})
+        return jsonify({"request_id": request_id, "payload": {"devices": result_devices}})
 
-        return jsonify({
-            "request_id": request_id,
-            "payload": {
-                "devices": result_devices
-            }
-        })
-
+    # action
     if body.get("request_type") == "action":
         devices = body.get("payload", {}).get("devices", [])
         result_devices = []
-
         for item in devices:
             device_id = item.get("id")
             capabilities = item.get("capabilities", [])
-
             if device_id not in DEVICES:
-                result_devices.append({
-                    "id": device_id,
-                    "action_result": {
-                        "status": "ERROR",
-                        "error_code": "DEVICE_UNREACHABLE"
-                    }
-                })
+                result_devices.append({"id": device_id, "action_result": {"status": "ERROR", "error_code": "DEVICE_UNREACHABLE"}})
                 continue
-
             for capability in capabilities:
                 if capability.get("type") == "devices.capabilities.on_off":
                     state = capability.get("state", {})
-                    if state.get("instance") == "on":
-                        DEVICES[device_id]["state"] = bool(state.get("value"))
-
+                    DEVICES[device_id]["state"] = bool(state.get("value", DEVICES[device_id]["state"]))
             result_devices.append({
                 "id": device_id,
-                "capabilities": [
-                    {
-                        "type": "devices.capabilities.on_off",
-                        "state": {
-                            "instance": "on",
-                            "value": DEVICES[device_id]["state"]
-                        }
-                    }
-                ],
-                "action_result": {
-                    "status": "DONE"
-                }
+                "capabilities": [{
+                    "type": "devices.capabilities.on_off",
+                    "state": {"instance": "on", "value": DEVICES[device_id]["state"]}
+                }],
+                "action_result": {"status": "DONE"}
             })
+        return jsonify({"request_id": request_id, "payload": {"devices": result_devices}})
 
-        return jsonify({
-            "request_id": request_id,
-            "payload": {
-                "devices": result_devices
-            }
-        })
+    return jsonify({"request_id": request_id, "payload": {"devices": []}})
 
-    return jsonify({
-        "request_id": request_id,
-        "payload": {
-            "devices": []
-        }
-    })
-
-
+# ---------- OAuth ----------
 @app.route("/oauth/authorize", methods=["GET", "POST", "HEAD"])
 def authorize():
     cleanup_expired()
-
     if request.method == "HEAD":
         return Response(status=200)
 
@@ -318,15 +245,13 @@ def authorize():
 
         if not client_id or not redirect_uri or response_type != "code":
             return Response("Invalid OAuth request", status=400)
-
         if not validate_client(client_id):
             return Response("Invalid client_id", status=401)
-
         if redirect_uri != YANDEX_REDIRECT_URI:
             return Response("Invalid redirect_uri", status=400)
-
         return Response(login_page(client_id, redirect_uri, state, scope), mimetype="text/html")
 
+    # POST login
     username = request.form.get("username", "")
     password = request.form.get("password", "")
     client_id = request.form.get("client_id", "")
@@ -336,37 +261,21 @@ def authorize():
 
     if not validate_client(client_id):
         return Response("Invalid client_id", status=401)
-
     if redirect_uri != YANDEX_REDIRECT_URI:
         return Response("Invalid redirect_uri", status=400)
-
     if username != TEST_USERNAME or password != TEST_PASSWORD:
         return Response("Неверный логин или пароль", status=401)
 
     code = secrets.token_urlsafe(32)
-    AUTH_CODES[code] = {
-        "username": username,
-        "client_id": client_id,
-        "scope": scope,
-        "expires_at": int(time.time()) + CODE_TTL_SECONDS,
-        "used": False
-    }
-
-    query = urllib.parse.urlencode({
-        "code": code,
-        "state": state
-    })
-
+    AUTH_CODES[code] = {"username": username, "client_id": client_id, "scope": scope, "expires_at": int(time.time()) + CODE_TTL_SECONDS, "used": False}
+    query = urllib.parse.urlencode({"code": code, "state": state})
     return redirect(f"{redirect_uri}?{query}", code=302)
-
 
 @app.route("/oauth/token", methods=["POST", "HEAD"])
 def token():
     cleanup_expired()
-
     if request.method == "HEAD":
         return Response(status=200)
-
     grant_type = request.form.get("grant_type", "")
     code = request.form.get("code", "")
     client_id = request.form.get("client_id", "")
@@ -374,52 +283,30 @@ def token():
 
     if grant_type != "authorization_code":
         return oauth_error("unsupported_grant_type", "Only authorization_code is supported")
-
     if not validate_client(client_id, client_secret):
         return oauth_error("invalid_client", "Invalid client credentials", 401)
-
     if code not in AUTH_CODES:
         return oauth_error("invalid_grant", "Invalid authorization code")
 
     code_data = AUTH_CODES[code]
-
     if code_data["used"]:
         return oauth_error("invalid_grant", "Code already used")
-
     if code_data["expires_at"] < int(time.time()):
         return oauth_error("invalid_grant", "Code expired")
 
     access_token = secrets.token_urlsafe(32)
     refresh_token = secrets.token_urlsafe(32)
-
-    ACCESS_TOKENS[access_token] = {
-        "username": code_data["username"],
-        "expires_at": int(time.time()) + ACCESS_TTL_SECONDS
-    }
-
-    REFRESH_TOKENS[refresh_token] = {
-        "username": code_data["username"],
-        "expires_at": int(time.time()) + REFRESH_TTL_SECONDS
-    }
-
+    ACCESS_TOKENS[access_token] = {"username": code_data["username"], "expires_at": int(time.time()) + ACCESS_TTL_SECONDS}
+    REFRESH_TOKENS[refresh_token] = {"username": code_data["username"], "expires_at": int(time.time()) + REFRESH_TTL_SECONDS}
     code_data["used"] = True
 
-    return jsonify({
-        "access_token": access_token,
-        "token_type": "bearer",
-        "expires_in": ACCESS_TTL_SECONDS,
-        "refresh_token": refresh_token,
-        "scope": code_data["scope"]
-    })
-
+    return jsonify({"access_token": access_token, "token_type": "bearer", "expires_in": ACCESS_TTL_SECONDS, "refresh_token": refresh_token, "scope": code_data["scope"]})
 
 @app.route("/oauth/refresh", methods=["POST", "HEAD"])
 def refresh():
     cleanup_expired()
-
     if request.method == "HEAD":
         return Response(status=200)
-
     grant_type = request.form.get("grant_type", "")
     refresh_token = request.form.get("refresh_token", "")
     client_id = request.form.get("client_id", "")
@@ -427,32 +314,16 @@ def refresh():
 
     if grant_type and grant_type != "refresh_token":
         return oauth_error("unsupported_grant_type", "Only refresh_token is supported")
-
     if not validate_client(client_id, client_secret):
         return oauth_error("invalid_client", "Invalid client credentials", 401)
-
     if refresh_token not in REFRESH_TOKENS:
         return oauth_error("invalid_grant", "Invalid refresh token")
-
     token_data = REFRESH_TOKENS[refresh_token]
-
     if token_data["expires_at"] < int(time.time()):
         return oauth_error("invalid_grant", "Refresh token expired")
-
     new_access_token = secrets.token_urlsafe(32)
-    ACCESS_TOKENS[new_access_token] = {
-        "username": token_data["username"],
-        "expires_at": int(time.time()) + ACCESS_TTL_SECONDS
-    }
-
-    return jsonify({
-        "access_token": new_access_token,
-        "token_type": "bearer",
-        "expires_in": ACCESS_TTL_SECONDS,
-        "refresh_token": refresh_token,
-        "scope": "basic"
-    })
-
+    ACCESS_TOKENS[new_access_token] = {"username": token_data["username"], "expires_at": int(time.time()) + ACCESS_TTL_SECONDS}
+    return jsonify({"access_token": new_access_token, "token_type": "bearer", "expires_in": ACCESS_TTL_SECONDS, "refresh_token": refresh_token, "scope": "basic"})
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
