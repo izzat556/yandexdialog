@@ -2,17 +2,27 @@ import os
 import time
 import secrets
 import urllib.parse
+import logging
 from flask import Flask, request, jsonify, Response, redirect
 
 app = Flask(__name__)
 
-# OAuth настройки
+# ---------- Logging ----------
+logging.basicConfig(level=logging.INFO)
+
+# ---------- OAuth Settings ----------
 CLIENT_ID = os.environ.get("CLIENT_ID", "my_alice_app_001")
 CLIENT_SECRET = os.environ.get("CLIENT_SECRET", "change_me_secret")
 TEST_USERNAME = os.environ.get("TEST_USERNAME", "admin")
 TEST_PASSWORD = os.environ.get("TEST_PASSWORD", "123456")
-YANDEX_REDIRECT_URI = "https://social.yandex.net/broker/redirect"
 
+# Cloud Run URL or fallback to Yandex redirect
+YANDEX_REDIRECT_URI = os.environ.get(
+    "YANDEX_REDIRECT_URI",
+    "https://social.yandex.net/broker/redirect"
+)
+
+# Token stores
 AUTH_CODES = {}
 ACCESS_TOKENS = {}
 REFRESH_TOKENS = {}
@@ -21,7 +31,7 @@ CODE_TTL_SECONDS = 300
 ACCESS_TTL_SECONDS = 3600
 REFRESH_TTL_SECONDS = 2592000
 
-# Простое тестовое устройство
+# Test device
 DEVICES = {
     "lamp_1": {
         "id": "lamp_1",
@@ -31,6 +41,7 @@ DEVICES = {
     }
 }
 
+# ---------- Helper Functions ----------
 def cleanup_expired():
     now = int(time.time())
     for store in (AUTH_CODES, ACCESS_TOKENS, REFRESH_TOKENS):
@@ -46,6 +57,7 @@ def validate_client(client_id, client_secret=None):
     return True
 
 def oauth_error(error, description, status=400):
+    logging.warning(f"OAuth error: {error} - {description}")
     return jsonify({"error": error, "error_description": description}), status
 
 def login_page(client_id="", redirect_uri="", state="", scope="basic"):
@@ -78,14 +90,15 @@ def get_user_by_token():
         return None
     return token_data["username"]
 
-# ---------- Root ----------
+# ---------- Routes ----------
+
 @app.route("/", methods=["GET", "HEAD"])
 def root():
     if request.method == "HEAD":
         return Response(status=200)
     return jsonify({"status": "ok", "message": "OAuth server is running"})
 
-# ---------- Smart Home endpoints ----------
+# Smart Home Endpoints
 @app.route("/v1.0/user/unlink", methods=["POST", "HEAD"])
 def user_unlink():
     if request.method == "HEAD":
@@ -150,8 +163,7 @@ def devices_action():
             })
     return jsonify({"devices": result_devices})
 
-# Общий endpoint для discovery, query и action
-# ---------- Smart Home endpoints ----------
+# General endpoint for discovery, query, action
 @app.route("/v1.0", methods=["POST", "HEAD"])
 def yandex_dialog():
     if request.method == "HEAD":
@@ -160,72 +172,21 @@ def yandex_dialog():
     body = request.get_json(silent=True) or {}
     request_id = body.get("headers", {}).get("request_id", "") or request.headers.get("X-Request-Id", "")
 
-    # ---------- Discovery ----------
-
+    # Discovery
     if body.get("request_type") == "discovery":
-        headers = body.get("headers", {})
-    request_id = headers.get("request_id", "unknown")
-    return jsonify({
-        "request_id": request_id,
-        "payload": {
-            "user_id": "admin",
-            "devices": [
-                {
-                    "id": "lamp_1",
-                    "name": "Лампа",
-                    "description": "цветная лампа",
-                    "room": "спальня",
-                    "type": "devices.types.light",
-                    "custom_data": {
-                        "foo": 1,
-                        "bar": "two",
-                        "baz": False,
-                        "qux": [1, "two", False],
-                        "quux": {"quuz": {"corge": []}}
-                    },
-                    "capabilities": [
-                        {
-                            "type": "devices.capabilities.on_off",
-                            "retrievable": True,
-                            "reportable": True
-                        },
-                        {
-                            "type": "devices.capabilities.range",
-                            "retrievable": True,
-                            "reportable": True,
-                            "parameters": {
-                                "instance": "brightness",
-                                "unit": "unit.percent",
-                                "range": {"min": 0, "max": 100, "precision": 1}
-                            }
-                        },
-                        {
-                            "type": "devices.capabilities.color_setting",
-                            "retrievable": True,
-                            "reportable": True,
-                            "parameters": {
-                                "color_model": "hsv",
-                                "temperature_k": {"min": 2700, "max": 9000, "precision": 1}
-                            }
-                        }
-                    ],
-                    "device_info": {
-                        "manufacturer": "Provider2",
-                        "model": "hue g11",
-                        "hw_version": "1.2",
-                        "sw_version": "5.4"
-                    }
-                }
-            ]
-        }
-    })
-    
-    # ---------- Query / Action ----------
+        return jsonify({
+            "request_id": request_id,
+            "payload": {
+                "user_id": "admin",
+                "devices": list(DEVICES.values())
+            }
+        })
+
     user = get_user_by_token()
     if not user:
         return jsonify({"error": "unauthorized"}), 401
 
-    # query
+    # Query
     if body.get("request_type") == "query":
         devices = body.get("payload", {}).get("devices", [])
         result_devices = []
@@ -235,16 +196,14 @@ def yandex_dialog():
                 dev = DEVICES[device_id]
                 result_devices.append({
                     "id": device_id,
-                    "capabilities": [
-                        {"type": "devices.capabilities.on_off",
-                         "state": {"instance": "on", "value": dev["state"]}}
-                    ]
+                    "capabilities": [{"type": "devices.capabilities.on_off",
+                                      "state": {"instance": "on", "value": dev["state"]}}]
                 })
             else:
                 result_devices.append({"id": device_id, "error_code": "DEVICE_UNREACHABLE"})
         return jsonify({"request_id": request_id, "payload": {"devices": result_devices}})
 
-    # action
+    # Action
     if body.get("request_type") == "action":
         devices = body.get("payload", {}).get("devices", [])
         result_devices = []
@@ -264,14 +223,13 @@ def yandex_dialog():
             result_devices.append({
                 "id": device_id,
                 "action_result": {"status": "DONE"},
-                "capabilities": [
-                    {"type": "devices.capabilities.on_off", "state": {"instance": "on", "value": dev["state"]}}
-                ]
+                "capabilities": [{"type": "devices.capabilities.on_off",
+                                  "state": {"instance": "on", "value": dev["state"]}}]
             })
         return jsonify({"request_id": request_id, "payload": {"devices": result_devices}})
 
-    # default fallback
     return jsonify({"request_id": request_id, "payload": {"devices": []}})
+
 # ---------- OAuth ----------
 @app.route("/oauth/authorize", methods=["GET", "POST", "HEAD"])
 def authorize():
@@ -290,8 +248,11 @@ def authorize():
             return Response("Invalid OAuth request", status=400)
         if not validate_client(client_id):
             return Response("Invalid client_id", status=401)
-        if redirect_uri != YANDEX_REDIRECT_URI:
+
+        # Allow Cloud Run redirect for testing
+        if redirect_uri != YANDEX_REDIRECT_URI and not redirect_uri.startswith("https://"):
             return Response("Invalid redirect_uri", status=400)
+
         return Response(login_page(client_id, redirect_uri, state, scope), mimetype="text/html")
 
     # POST login
@@ -304,13 +265,22 @@ def authorize():
 
     if not validate_client(client_id):
         return Response("Invalid client_id", status=401)
-    if redirect_uri != YANDEX_REDIRECT_URI:
+
+    # Allow Cloud Run redirect
+    if redirect_uri != YANDEX_REDIRECT_URI and not redirect_uri.startswith("https://"):
         return Response("Invalid redirect_uri", status=400)
+
     if username != TEST_USERNAME or password != TEST_PASSWORD:
         return Response("Неверный логин или пароль", status=401)
 
     code = secrets.token_urlsafe(32)
-    AUTH_CODES[code] = {"username": username, "client_id": client_id, "scope": scope, "expires_at": int(time.time()) + CODE_TTL_SECONDS, "used": False}
+    AUTH_CODES[code] = {
+        "username": username,
+        "client_id": client_id,
+        "scope": scope,
+        "expires_at": int(time.time()) + CODE_TTL_SECONDS,
+        "used": False
+    }
     query = urllib.parse.urlencode({"code": code, "state": state})
     return redirect(f"{redirect_uri}?{query}", code=302)
 
@@ -343,7 +313,13 @@ def token():
     REFRESH_TOKENS[refresh_token] = {"username": code_data["username"], "expires_at": int(time.time()) + REFRESH_TTL_SECONDS}
     code_data["used"] = True
 
-    return jsonify({"access_token": access_token, "token_type": "bearer", "expires_in": ACCESS_TTL_SECONDS, "refresh_token": refresh_token, "scope": code_data["scope"]})
+    return jsonify({
+        "access_token": access_token,
+        "token_type": "bearer",
+        "expires_in": ACCESS_TTL_SECONDS,
+        "refresh_token": refresh_token,
+        "scope": code_data["scope"]
+    })
 
 @app.route("/oauth/refresh", methods=["POST", "HEAD"])
 def refresh():
@@ -366,8 +342,15 @@ def refresh():
         return oauth_error("invalid_grant", "Refresh token expired")
     new_access_token = secrets.token_urlsafe(32)
     ACCESS_TOKENS[new_access_token] = {"username": token_data["username"], "expires_at": int(time.time()) + ACCESS_TTL_SECONDS}
-    return jsonify({"access_token": new_access_token, "token_type": "bearer", "expires_in": ACCESS_TTL_SECONDS, "refresh_token": refresh_token, "scope": "basic"})
+    return jsonify({
+        "access_token": new_access_token,
+        "token_type": "bearer",
+        "expires_in": ACCESS_TTL_SECONDS,
+        "refresh_token": refresh_token,
+        "scope": "basic"
+    })
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
+    logging.info(f"Starting server on 0.0.0.0:{port}")
     app.run(host="0.0.0.0", port=port)
