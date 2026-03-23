@@ -114,54 +114,8 @@ def user_devices():
         "devices": list(DEVICES.values())
     })
 
-@app.route("/v1.0/user/devices/query", methods=["POST", "HEAD"])
-def devices_query():
-    if request.method == "HEAD":
-        return "", 200
-    data = request.get_json(silent=True) or {}
-    devices = data.get("devices", [])
-    result_devices = []
 
-    for device_id in devices:
-        if device_id in DEVICES:
-            result_devices.append({
-                "id": device_id,
-                "capabilities": [{
-                    "type": "devices.capabilities.on_off",
-                    "state": {"instance": "on", "value": DEVICES[device_id]["state"]}
-                }]
-            })
-        else:
-            result_devices.append({"id": device_id, "error_code": "DEVICE_UNREACHABLE"})
-    return jsonify({"devices": result_devices})
 
-@app.route("/v1.0/user/devices/action", methods=["POST", "HEAD"])
-def devices_action():
-    if request.method == "HEAD":
-        return "", 200
-    data = request.get_json(silent=True) or {}
-    devices = data.get("devices", [])
-    result_devices = []
-
-    for device in devices:
-        device_id = device.get("id")
-        state = device.get("capabilities", [{}])[0].get("state", {})
-        if device_id in DEVICES:
-            DEVICES[device_id]["state"] = state.get("value", DEVICES[device_id]["state"])
-            result_devices.append({
-                "id": device_id,
-                "action_result": {"status": "DONE"},
-                "capabilities": [{
-                    "type": "devices.capabilities.on_off",
-                    "state": {"instance": "on", "value": DEVICES[device_id]["state"]}
-                }]
-            })
-        else:
-            result_devices.append({
-                "id": device_id,
-                "action_result": {"status": "ERROR", "error_code": "DEVICE_UNREACHABLE"}
-            })
-    return jsonify({"devices": result_devices})
 
 # Main Yandex Smart Home endpoint
 @app.route("/v1.0", methods=["POST", "HEAD"])
@@ -172,19 +126,11 @@ def yandex_dialog():
     body = request.get_json(silent=True) or {}
     request_id = body.get("headers", {}).get("request_id", "") or request.headers.get("X-Request-Id", "")
 
-    request_type = body.get("request_type")
-    
-    # Discovery must always return a non-empty user_id
-    
-    user = get_user_by_token()
-    if not user:
-        return jsonify({"error": "unauthorized"}), 401
-
+   
     
 
    
 
-    return jsonify({"request_id": request_id, "payload": {"devices": []}})
 
 # OAuth endpoints
 @app.route("/oauth/authorize", methods=["GET", "POST", "HEAD"])
