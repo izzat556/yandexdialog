@@ -175,58 +175,14 @@ def yandex_dialog():
     request_type = body.get("request_type")
     
     # Discovery must always return a non-empty user_id
-    if request_type == "discovery":
-        return jsonify({
-            "request_id": request_id,
-            "payload": {
-                "user_id": "user_001",
-                "devices": list(DEVICES.values())
-            }
-        })
-
+    
     user = get_user_by_token()
     if not user:
         return jsonify({"error": "unauthorized"}), 401
 
-    if request_type == "query":
-        devices = body.get("payload", {}).get("devices", [])
-        result_devices = []
-        for item in devices:
-            device_id = item.get("id")
-            if device_id in DEVICES:
-                dev = DEVICES[device_id]
-                result_devices.append({
-                    "id": device_id,
-                    "capabilities": [{"type": "devices.capabilities.on_off",
-                                      "state": {"instance": "on", "value": dev["state"]}}]
-                })
-            else:
-                result_devices.append({"id": device_id, "error_code": "DEVICE_UNREACHABLE"})
-        return jsonify({"request_id": request_id, "payload": {"devices": result_devices}})
+    
 
-    if request_type == "action":
-        devices = body.get("payload", {}).get("devices", [])
-        result_devices = []
-        for item in devices:
-            device_id = item.get("id")
-            capabilities = item.get("capabilities", [])
-            if device_id not in DEVICES:
-                result_devices.append({
-                    "id": device_id,
-                    "action_result": {"status": "ERROR", "error_code": "DEVICE_UNREACHABLE"}
-                })
-                continue
-            dev = DEVICES[device_id]
-            for cap in capabilities:
-                if cap.get("type") == "devices.capabilities.on_off":
-                    dev["state"] = bool(cap.get("state", {}).get("value", dev["state"]))
-            result_devices.append({
-                "id": device_id,
-                "action_result": {"status": "DONE"},
-                "capabilities": [{"type": "devices.capabilities.on_off",
-                                  "state": {"instance": "on", "value": dev["state"]}}]
-            })
-        return jsonify({"request_id": request_id, "payload": {"devices": result_devices}})
+   
 
     return jsonify({"request_id": request_id, "payload": {"devices": []}})
 
