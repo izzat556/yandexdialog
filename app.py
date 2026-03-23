@@ -19,7 +19,7 @@ TEST_PASSWORD = os.environ.get("TEST_PASSWORD", "123456")
 # Cloud Run URL or fallback to Yandex redirect
 YANDEX_REDIRECT_URI = os.environ.get(
     "YANDEX_REDIRECT_URI",
-    "https://social.yandex.net/broker/redirect"
+    "https://izzat-415138950912.europe-west1.run.app/oauth/authorize"
 )
 
 # Token stores
