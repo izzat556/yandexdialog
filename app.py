@@ -8,10 +8,8 @@ app = Flask(__name__)
 
 CLIENT_ID = os.environ.get("CLIENT_ID", "my_alice_app_001")
 CLIENT_SECRET = os.environ.get("CLIENT_SECRET", "change_me_secret")
-
 TEST_USERNAME = os.environ.get("TEST_USERNAME", "admin")
 TEST_PASSWORD = os.environ.get("TEST_PASSWORD", "123456")
-
 YANDEX_REDIRECT_URI = "https://social.yandex.net/broker/redirect"
 
 AUTH_CODES = {}
@@ -40,59 +38,25 @@ def validate_client(client_id, client_secret=None):
 
 
 def oauth_error(error, description, status=400):
-    return jsonify({
-        "error": error,
-        "error_description": description
-    }), status
+    return jsonify({"error": error, "error_description": description}), status
 
 
 def login_page(client_id="", redirect_uri="", state="", scope="basic"):
     return f"""
     <!doctype html>
     <html lang="ru">
-    <head>
-      <meta charset="utf-8">
-      <title>Вход</title>
-      <style>
-        body {{
-          font-family: Arial, sans-serif;
-          background: #f4f6f8;
-          padding: 40px;
-        }}
-        .card {{
-          max-width: 420px;
-          margin: 0 auto;
-          background: white;
-          border-radius: 16px;
-          padding: 24px;
-          box-shadow: 0 8px 24px rgba(0,0,0,0.08);
-        }}
-        input, button {{
-          width: 100%;
-          padding: 12px;
-          margin-top: 12px;
-          box-sizing: border-box;
-        }}
-        button {{
-          border: none;
-          border-radius: 10px;
-          cursor: pointer;
-        }}
-      </style>
-    </head>
+    <head><meta charset="utf-8"><title>Вход</title></head>
     <body>
-      <div class="card">
-        <h2>Вход в аккаунт</h2>
-        <form method="post" action="/oauth/authorize">
-          <input type="hidden" name="client_id" value="{client_id}">
-          <input type="hidden" name="redirect_uri" value="{redirect_uri}">
-          <input type="hidden" name="state" value="{state}">
-          <input type="hidden" name="scope" value="{scope}">
-          <input type="text" name="username" placeholder="Логин" required>
-          <input type="password" name="password" placeholder="Пароль" required>
-          <button type="submit">Войти и привязать</button>
-        </form>
-      </div>
+      <h2>Вход в аккаунт</h2>
+      <form method="post" action="/oauth/authorize">
+        <input type="hidden" name="client_id" value="{client_id}">
+        <input type="hidden" name="redirect_uri" value="{redirect_uri}">
+        <input type="hidden" name="state" value="{state}">
+        <input type="hidden" name="scope" value="{scope}">
+        <input type="text" name="username" placeholder="Логин" required>
+        <input type="password" name="password" placeholder="Пароль" required>
+        <button type="submit">Войти и привязать</button>
+      </form>
     </body>
     </html>
     """
@@ -102,9 +66,20 @@ def login_page(client_id="", redirect_uri="", state="", scope="basic"):
 def root():
     if request.method == "HEAD":
         return Response(status=200)
+    return jsonify({"status": "ok", "message": "OAuth server is running"})
+
+
+@app.route("/v1.0", methods=["GET", "POST", "HEAD"])
+def yandex_dialog():
+    if request.method == "HEAD":
+        return Response(status=200)
+
     return jsonify({
-        "status": "ok",
-        "message": "OAuth server is running"
+        "response": {
+            "text": "Привет, Алиса!",
+            "end_session": False
+        },
+        "version": "1.0"
     })
 
 
