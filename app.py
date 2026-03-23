@@ -161,62 +161,65 @@ def yandex_dialog():
     request_id = body.get("headers", {}).get("request_id", "") or request.headers.get("X-Request-Id", "")
 
     # ---------- Discovery ----------
-    if body.get("request_type") == "discovery":
-        return jsonify({
-            "request_id": request_id,
-            "payload": {
-                "user_id": "Misha-01-super-545",  # 🔹 user_id обязательно
-                "devices": [
-                    {
-                        "id": "lamp_1",
-                        "name": "Лампа",
-                        "description": "цветная лампа",
-                        "room": "спальня",
-                        "type": "devices.types.light",
-                        "custom_data": {
-                            "foo": 1,
-                            "bar": "two",
-                            "baz": False,
-                            "qux": [1, "two", False],
-                            "quux": {"quuz": {"corge": []}}
-                        },
-                        "capabilities": [
-                            {
-                                "type": "devices.capabilities.on_off",
-                                "retrievable": True,
-                                "reportable": True
-                            },
-                            {
-                                "type": "devices.capabilities.range",
-                                "retrievable": True,
-                                "reportable": True,
-                                "parameters": {
-                                    "instance": "brightness",
-                                    "unit": "unit.percent",
-                                    "range": {"min": 0, "max": 100, "precision": 1}
-                                }
-                            },
-                            {
-                                "type": "devices.capabilities.color_setting",
-                                "retrievable": True,
-                                "reportable": True,
-                                "parameters": {
-                                    "color_model": "hsv",
-                                    "temperature_k": {"min": 2700, "max": 9000, "precision": 1}
-                                }
-                            }
-                        ],
-                        "device_info": {
-                            "manufacturer": "Provider2",
-                            "model": "hue g11",
-                            "hw_version": "1.2",
-                            "sw_version": "5.4"
-                        }
-                    }
-                ]
-            }
-        })
 
+    if body.get("request_type") == "discovery":
+        headers = body.get("headers", {})
+    request_id = headers.get("request_id", "unknown")
+    return jsonify({
+        "request_id": request_id,
+        "payload": {
+            "user_id": "admin",
+            "devices": [
+                {
+                    "id": "lamp_1",
+                    "name": "Лампа",
+                    "description": "цветная лампа",
+                    "room": "спальня",
+                    "type": "devices.types.light",
+                    "custom_data": {
+                        "foo": 1,
+                        "bar": "two",
+                        "baz": False,
+                        "qux": [1, "two", False],
+                        "quux": {"quuz": {"corge": []}}
+                    },
+                    "capabilities": [
+                        {
+                            "type": "devices.capabilities.on_off",
+                            "retrievable": True,
+                            "reportable": True
+                        },
+                        {
+                            "type": "devices.capabilities.range",
+                            "retrievable": True,
+                            "reportable": True,
+                            "parameters": {
+                                "instance": "brightness",
+                                "unit": "unit.percent",
+                                "range": {"min": 0, "max": 100, "precision": 1}
+                            }
+                        },
+                        {
+                            "type": "devices.capabilities.color_setting",
+                            "retrievable": True,
+                            "reportable": True,
+                            "parameters": {
+                                "color_model": "hsv",
+                                "temperature_k": {"min": 2700, "max": 9000, "precision": 1}
+                            }
+                        }
+                    ],
+                    "device_info": {
+                        "manufacturer": "Provider2",
+                        "model": "hue g11",
+                        "hw_version": "1.2",
+                        "sw_version": "5.4"
+                    }
+                }
+            ]
+        }
+    })
+    
     # ---------- Query / Action ----------
     user = get_user_by_token()
     if not user:
