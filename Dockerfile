@@ -1,29 +1,21 @@
-# Use an official Python runtime
+# Use official Python runtime
 FROM python:3.11-slim
-
-# Set environment variables
-ENV PYTHONUNBUFFERED=1
 
 # Set workdir
 WORKDIR /app
 
-# Copy requirements first for caching
+# Copy and install dependencies
 COPY requirements.txt .
-
-# Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the code
+# Copy the app
 COPY . .
 
-# Expose port (Cloud Run will route traffic here)
-EXPOSE 10000
-
-# Set environment variables for Flask
-ENV FLASK_APP=main.py
-ENV FLASK_RUN_HOST=0.0.0.0
-ENV FLASK_RUN_PORT=10000
+# Set the PORT environment variable (Cloud Run uses this)
 ENV PORT 8080
 
-# Run Flask
+# Expose the port (optional, good practice)
+EXPOSE 8080
+
+# Run the app with gunicorn on $PORT
 CMD ["gunicorn", "-b", "0.0.0.0:8080", "main:app"]
