@@ -120,25 +120,34 @@ def yandex_smart_home():
     if request.method == "HEAD":
         return Response(status=200)
 
-    # 1. Authenticate user
-    user_id = get_user_by_token()
-    if not user_id:
-        return jsonify({"error": "Unauthorized"}), 401
-
-    # 2. Parse request
+    # 1. Parse request body
     body = request.get_json(silent=True)
     if not body:
         return jsonify({"error": "Invalid JSON"}), 400
 
+    # 2. Extract authorization token from the JSON body
+    auth = body.get("headers", {}).get("authorization", "")
+    if not auth.startswith("Bearer "):
+        return jsonify({"error": "Unauthorized"}), 401
+
+    token = auth.replace("Bearer ", "", 1).strip()
+
+    # 3. Validate token
+    token_data = ACCESS_TOKENS.get(token)
+    if not token_data or token_data["expires_at"] < int(time.time()):
+        return jsonify({"error": "Unauthorized"}), 401
+
+    user_id = token_data["username"]   # This becomes the user_id
+
+    # 4. Get request metadata
     request_type = body.get("request_type")
     api_version = body.get("api_version", 1.0)
     request_id = body.get("headers", {}).get("request_id", "")
 
     logging.info(f"Smart Home request: type={request_type}, user={user_id}, req_id={request_id}")
 
-    # 3. Handle different request types
+    # 5. Handle different request types
     if request_type == "discovery":
-        # Build devices list with capabilities
         devices_list = []
         for dev_id, dev in DEVICES.items():
             devices_list.append({
@@ -160,10 +169,8 @@ def yandex_smart_home():
         })
 
     elif request_type == "state":
-        # Report current states
         devices_state = []
         for dev_id, dev in DEVICES.items():
-            # Build state for each capability
             capabilities_state = []
             for cap in dev["capabilities"]:
                 if cap["type"] == "devices.capabilities.on_off":
@@ -174,8 +181,6 @@ def yandex_smart_home():
                             "value": dev["state"]
                         }
                     })
-                # Add other capability states here if needed
-
             devices_state.append({
                 "id": dev["id"],
                 "capabilities": capabilities_state
@@ -189,7 +194,6 @@ def yandex_smart_home():
         })
 
     elif request_type == "action":
-        # Apply actions
         payload = body.get("payload", {})
         devices_actions = payload.get("devices", [])
         updated_devices = []
@@ -210,7 +214,6 @@ def yandex_smart_home():
                         DEVICES[device_id]["state"] = new_state
                         device_state_updated = True
 
-            # Prepare response for this device
             updated_capabilities = []
             if device_state_updated:
                 updated_capabilities.append({
@@ -236,6 +239,7 @@ def yandex_smart_home():
 
     else:
         return jsonify({"error": "Unsupported request_type"}), 400
+          
 
 # Keep legacy endpoints (optional, not used by Yandex Smart Home)
 @app.route("/v1.0/user/unlink", methods=["POST", "HEAD"])
