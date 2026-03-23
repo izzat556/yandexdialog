@@ -369,5 +369,5 @@ def refresh():
     return jsonify({"access_token": new_access_token, "token_type": "bearer", "expires_in": ACCESS_TTL_SECONDS, "refresh_token": refresh_token, "scope": "basic"})
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
+    port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
