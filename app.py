@@ -16,13 +16,13 @@ CLIENT_SECRET = os.environ.get("CLIENT_SECRET", "change_me_secret")
 TEST_USERNAME = os.environ.get("TEST_USERNAME", "admin")
 TEST_PASSWORD = os.environ.get("TEST_PASSWORD", "123456")
 
-# Cloud Run URL or fallback to Yandex redirect
+# Redirect URI (Yandex or Cloud Run endpoint)
 YANDEX_REDIRECT_URI = os.environ.get(
     "YANDEX_REDIRECT_URI",
     "https://izzat-415138950912.europe-west1.run.app/oauth/authorize"
 )
 
-# Token stores
+# ---------- Token stores ----------
 AUTH_CODES = {}
 ACCESS_TOKENS = {}
 REFRESH_TOKENS = {}
@@ -31,7 +31,7 @@ CODE_TTL_SECONDS = 300
 ACCESS_TTL_SECONDS = 3600
 REFRESH_TTL_SECONDS = 2592000
 
-# Test device
+# ---------- Test devices ----------
 DEVICES = {
     "lamp_1": {
         "id": "lamp_1",
@@ -41,7 +41,7 @@ DEVICES = {
     }
 }
 
-# ---------- Helper Functions ----------
+# ---------- Helper functions ----------
 def cleanup_expired():
     now = int(time.time())
     for store in (AUTH_CODES, ACCESS_TOKENS, REFRESH_TOKENS):
@@ -98,7 +98,7 @@ def root():
         return Response(status=200)
     return jsonify({"status": "ok", "message": "OAuth server is running"})
 
-# Smart Home Endpoints
+# Smart Home endpoints
 @app.route("/v1.0/user/unlink", methods=["POST", "HEAD"])
 def user_unlink():
     if request.method == "HEAD":
@@ -163,7 +163,7 @@ def devices_action():
             })
     return jsonify({"devices": result_devices})
 
-# General endpoint for discovery, query, action
+# Main Yandex Smart Home endpoint
 @app.route("/v1.0", methods=["POST", "HEAD"])
 def yandex_dialog():
     if request.method == "HEAD":
@@ -172,12 +172,14 @@ def yandex_dialog():
     body = request.get_json(silent=True) or {}
     request_id = body.get("headers", {}).get("request_id", "") or request.headers.get("X-Request-Id", "")
 
-    # Discovery
-    if body.get("request_type") == "discovery":
+    request_type = body.get("request_type")
+    
+    # Discovery must always return a non-empty user_id
+    if request_type == "discovery":
         return jsonify({
             "request_id": request_id,
             "payload": {
-                "user_id": "admin",
+                "user_id": "user_001",
                 "devices": list(DEVICES.values())
             }
         })
@@ -186,8 +188,7 @@ def yandex_dialog():
     if not user:
         return jsonify({"error": "unauthorized"}), 401
 
-    # Query
-    if body.get("request_type") == "query":
+    if request_type == "query":
         devices = body.get("payload", {}).get("devices", [])
         result_devices = []
         for item in devices:
@@ -203,8 +204,7 @@ def yandex_dialog():
                 result_devices.append({"id": device_id, "error_code": "DEVICE_UNREACHABLE"})
         return jsonify({"request_id": request_id, "payload": {"devices": result_devices}})
 
-    # Action
-    if body.get("request_type") == "action":
+    if request_type == "action":
         devices = body.get("payload", {}).get("devices", [])
         result_devices = []
         for item in devices:
@@ -230,7 +230,7 @@ def yandex_dialog():
 
     return jsonify({"request_id": request_id, "payload": {"devices": []}})
 
-# ---------- OAuth ----------
+# OAuth endpoints
 @app.route("/oauth/authorize", methods=["GET", "POST", "HEAD"])
 def authorize():
     cleanup_expired()
@@ -248,8 +248,6 @@ def authorize():
             return Response("Invalid OAuth request", status=400)
         if not validate_client(client_id):
             return Response("Invalid client_id", status=401)
-
-        # Allow Cloud Run redirect for testing
         if redirect_uri != YANDEX_REDIRECT_URI and not redirect_uri.startswith("https://"):
             return Response("Invalid redirect_uri", status=400)
 
@@ -265,11 +263,8 @@ def authorize():
 
     if not validate_client(client_id):
         return Response("Invalid client_id", status=401)
-
-    # Allow Cloud Run redirect
     if redirect_uri != YANDEX_REDIRECT_URI and not redirect_uri.startswith("https://"):
         return Response("Invalid redirect_uri", status=400)
-
     if username != TEST_USERNAME or password != TEST_PASSWORD:
         return Response("Неверный логин или пароль", status=401)
 
@@ -337,11 +332,14 @@ def refresh():
         return oauth_error("invalid_client", "Invalid client credentials", 401)
     if refresh_token not in REFRESH_TOKENS:
         return oauth_error("invalid_grant", "Invalid refresh token")
+
     token_data = REFRESH_TOKENS[refresh_token]
     if token_data["expires_at"] < int(time.time()):
         return oauth_error("invalid_grant", "Refresh token expired")
+
     new_access_token = secrets.token_urlsafe(32)
     ACCESS_TOKENS[new_access_token] = {"username": token_data["username"], "expires_at": int(time.time()) + ACCESS_TTL_SECONDS}
+
     return jsonify({
         "access_token": new_access_token,
         "token_type": "bearer",
@@ -350,3 +348,4 @@ def refresh():
         "scope": "basic"
     })
 
+# ---------- Run ----------
